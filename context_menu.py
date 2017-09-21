@@ -13,6 +13,12 @@ from win32com.shell import shell, shellcon
 import win32gui
 import win32con
 
+import win32file
+import json
+from os import path
+
+FILE = "MizTagger.json"
+
 class ShellExtension:
     _reg_progid_ = "Python.ShellExtension.ContextMenu"
     _reg_desc_ = "Python Sample Shell Extension (context menu)"
@@ -26,6 +32,7 @@ class ShellExtension:
         self.data = {"tags": ["Unix", "Windows", "MIZip"], "maps": {}}
         # maps: {"uid": tagum}
         self.fnames = []
+        self.uids = []
 
     def QueryContextMenu(self, hMenu, indexMenu, idCmdFirst, idCmdLast, uFlags):
         print("QCM", hMenu, indexMenu, idCmdFirst, idCmdLast, uFlags)
@@ -34,8 +41,25 @@ class ShellExtension:
         sm = self.dataobj.GetData(format_etc)
         num_files = shell.DragQueryFile(sm.data_handle, -1)
 
+        filepath = path.join(
+            path.dirname(shell.DragQueryFile(sm.data_handle, 0)),
+            FILE)
+        self.filepath = filepath
+
+        if path.exists(filepath):
+            with open(filepath, "r", encoding="utf8") as fp:
+                self.data = json.load(fp)
+
         for i in range(num_files):
-            self.fnames.append(shell.DragQueryFile(sm.data_handle, i))
+            fname = shell.DragQueryFile(sm.data_handle, i)
+            self.fnames.append(fname)
+            with open(fname, "rb") as fp:
+                handle = win32file._get_osfhandle(fp.fileno())
+                info = win32file.GetFileInformationByHandle(handle)
+                uid = str((info[8]<<32)+info[9])
+                self.uids.append(uid)
+                if uid not in self.data["maps"]:
+                    self.data["maps"][uid] = 0b0
 
         win32gui.InsertMenu(hMenu, indexMenu,
                             win32con.MF_SEPARATOR|win32con.MF_BYPOSITION,
@@ -50,7 +74,7 @@ class ShellExtension:
             # if more than one file selected, then add the tag to all of them.
             # what if want to remove the tag from all of them? rare case, right?
         else:
-            tagum = 0b10101
+            tagum = self.data["maps"][self.uids[0]]
             # read tagum of this file from data/storage
         for i, item in enumerate(self.data["tags"]):
             tagunit = 0b1 << i
@@ -71,14 +95,14 @@ class ShellExtension:
 
     def InvokeCommand(self, ci):
         mask, hwnd, verb, params, dir, nShow, hotkey, hicon = ci
+        tagunit = 0b1 << verb
         if len(self.fnames)>1:
-            win32gui.MessageBox(hwnd,
-                "Tag '%s' added to [%s]"%(self.data["tags"][verb], ",\n".join(self.fnames)),
-                "Wow", win32con.MB_OK)
+            for uid in self.uids:
+                self.data["maps"][uid] |= tagunit
         else:
-            win32gui.MessageBox(hwnd,
-                "Toggle Tag '%s' on [%s]"%(self.data["tags"][verb], self.fnames[0]),
-                "Wow", win32con.MB_OK)
+            self.data["maps"][self.uids[0]] ^= tagunit
+        with open(self.filepath, "w", encoding="utf8") as fp:
+            json.dump(self.data, fp, indent=2)
         # should pay attention to the 'verb', may related to idCmd
 
     def GetCommandString(self, cmd, typ):
