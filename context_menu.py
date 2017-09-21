@@ -23,6 +23,9 @@ class ShellExtension:
     def Initialize(self, folder, dataobj, hkey):
         print("Init", folder, dataobj, hkey)
         self.dataobj = dataobj
+        self.data = {"tags": ["Unix", "Windows", "MIZip"], "maps": {}}
+        # maps: {"uid": tagum}
+        self.fnames = []
 
     def QueryContextMenu(self, hMenu, indexMenu, idCmdFirst, idCmdLast, uFlags):
         print("QCM", hMenu, indexMenu, idCmdFirst, idCmdLast, uFlags)
@@ -30,33 +33,32 @@ class ShellExtension:
         format_etc = win32con.CF_HDROP, None, 1, -1, pythoncom.TYMED_HGLOBAL
         sm = self.dataobj.GetData(format_etc)
         num_files = shell.DragQueryFile(sm.data_handle, -1)
-        if num_files>1:
-            msg = "&Hello from Python (with %d files selected)" % num_files
-        else:
-            fname = shell.DragQueryFile(sm.data_handle, 0)
-            msg = "&Hello from Python (with '%s' selected)" % fname
-        idCmd = idCmdFirst
-        items = ['First Python content menu item']
-        if (uFlags & 0x000F) == shellcon.CMF_NORMAL: # Check == here, since CMF_NORMAL=0
-            print("CMF_NORMAL...")
-            items.append(msg)
-        elif uFlags & shellcon.CMF_VERBSONLY:
-            print("CMF_VERBSONLY...")
-            items.append(msg + " - shortcut")
-        elif uFlags & shellcon.CMF_EXPLORE:
-            print("CMF_EXPLORE...")
-            items.append(msg + " - normal file, right-click in Explorer")
-        elif uFlags & CMF_DEFAULTONLY:
-            print("CMF_DEFAULTONLY...\r\n")
-        else:
-            print("** unknown flags", uFlags)
+
+        for i in range(num_files):
+            self.fnames.append(shell.DragQueryFile(sm.data_handle, i))
+
         win32gui.InsertMenu(hMenu, indexMenu,
                             win32con.MF_SEPARATOR|win32con.MF_BYPOSITION,
                             0, None)
         indexMenu += 1
-        for item in items:
+
+        flag = win32con.MF_STRING|win32con.MF_BYPOSITION
+        tagum = 0b0
+        idCmd = idCmdFirst
+        if num_files>1:
+            pass
+            # if more than one file selected, then add the tag to all of them.
+            # what if want to remove the tag from all of them? rare case, right?
+        else:
+            tagum = 0b10101
+            # read tagum of this file from data/storage
+        for i, item in enumerate(self.data["tags"]):
+            tagunit = 0b1 << i
+            f = flag
+            if (tagum & tagunit) == tagunit:
+                f |= win32con.MF_CHECKED
             win32gui.InsertMenu(hMenu, indexMenu,
-                                win32con.MF_STRING|win32con.MF_BYPOSITION,
+                                f,
                                 idCmd, item)
             indexMenu += 1
             idCmd += 1
@@ -69,7 +71,15 @@ class ShellExtension:
 
     def InvokeCommand(self, ci):
         mask, hwnd, verb, params, dir, nShow, hotkey, hicon = ci
-        win32gui.MessageBox(hwnd, "Hello", "Wow", win32con.MB_OK)
+        if len(self.fnames)>1:
+            win32gui.MessageBox(hwnd,
+                "Tag '%s' added to [%s]"%(self.data["tags"][verb], ",\n".join(self.fnames)),
+                "Wow", win32con.MB_OK)
+        else:
+            win32gui.MessageBox(hwnd,
+                "Toggle Tag '%s' on [%s]"%(self.data["tags"][verb], self.fnames[0]),
+                "Wow", win32con.MB_OK)
+        # should pay attention to the 'verb', may related to idCmd
 
     def GetCommandString(self, cmd, typ):
         # If GetCommandString returns the same string for all items then
@@ -81,7 +91,7 @@ class ShellExtension:
 def DllRegisterServer():
     import winreg
     key = winreg.CreateKey(winreg.HKEY_CLASSES_ROOT,
-                            "Python.File\\shellex")
+                            "*\\shellex")
     subkey = winreg.CreateKey(key, "ContextMenuHandlers")
     subkey2 = winreg.CreateKey(subkey, "PythonSample")
     winreg.SetValueEx(subkey2, None, 0, winreg.REG_SZ, ShellExtension._reg_clsid_)
@@ -91,7 +101,7 @@ def DllUnregisterServer():
     import winreg
     try:
         key = winreg.DeleteKey(winreg.HKEY_CLASSES_ROOT,
-                                "Python.File\\shellex\\ContextMenuHandlers\\PythonSample")
+                                "*\\shellex\\ContextMenuHandlers\\PythonSample")
     except WindowsError as details:
         import errno
         if details.errno != errno.ENOENT:
