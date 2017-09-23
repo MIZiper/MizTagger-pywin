@@ -30,8 +30,7 @@ class ShellExtension:
     def Initialize(self, folder, dataobj, hkey):
         print("Init", folder, dataobj, hkey)
         self.dataobj = dataobj
-        self.data = {"tags": ["Unix", "Windows", "MIZip"], "maps": {}}
-        # maps: {"uid": tagum}
+        self.data = {"tags": [], "maps": {}}
         self.fnames = []
         self.uids = []
 
@@ -119,6 +118,64 @@ class ShellExtension:
         # ignored)
         return "Hello from Python (cmd=%d)!!" % (cmd,)
 
+class ShellExtensionFolder:
+    _reg_progid_ = "MizTagger.ShellExtension.FolderContextMenu"
+    _reg_desc_ = "MizTagger context menu entries for folder"
+    _reg_clsid_ = "{8921201f-9f10-4c0f-9018-fa15f98b5924}"
+    _com_interfaces_ = [shell.IID_IShellExtInit, shell.IID_IContextMenu]
+    _public_methods_ = shellcon.IContextMenu_Methods + shellcon.IShellExtInit_Methods
+
+    def Initialize(self, folder, dataobj, hkey):
+        fd = shell.SHGetPathFromIDList(folder).decode("utf8")
+        filepath = path.join(fd, FILE)
+        self.filepath = filepath
+        self.data = {"tags": [], "maps": {}}
+        if path.exists(filepath):
+            with open(filepath, "r", encoding="utf8") as fp:
+                self.data = json.load(fp)
+
+    def QueryContextMenu(self, hMenu, indexMenu, idCmdFirst, idCmdLast, uFlags):
+        win32gui.InsertMenu(hMenu, indexMenu,
+                            win32con.MF_SEPARATOR|win32con.MF_BYPOSITION,
+                            0, None)
+        indexMenu += 1
+
+        items = ["Add Tag", "Filter"]
+        idCmd = idCmdFirst
+        submenu = win32gui.CreatePopupMenu()
+        subindex = 0
+        for item in items:
+            win32gui.InsertMenu(submenu, subindex,
+                                win32con.MF_STRING|win32con.MF_BYPOSITION,
+                                idCmd, item)
+            subindex += 1
+            idCmd += 1
+        win32gui.InsertMenu(hMenu, indexMenu,
+                            win32con.MF_POPUP|win32con.MF_STRING|win32con.MF_BYPOSITION,
+                            submenu, APP)
+        indexMenu += 1
+
+        win32gui.InsertMenu(hMenu, indexMenu,
+                            win32con.MF_SEPARATOR|win32con.MF_BYPOSITION,
+                            0, None)
+        indexMenu += 1
+        return idCmd-idCmdFirst # Must return number of menu items we added.
+
+    def InvokeCommand(self, ci):
+        mask, hwnd, verb, params, dir, nShow, hotkey, hicon = ci
+        if verb==0: # Add Tag
+            import random
+            self.data["tags"].append("%.3f" % random.random())
+            with open(self.filepath, "w", encoding="utf8") as fp:
+                json.dump(self.data, fp, indent=2)
+
+    def GetCommandString(self, cmd, typ):
+        # If GetCommandString returns the same string for all items then
+        # the shell seems to ignore all but one.  This is even true in
+        # Win7 etc where there is no status bar (and hence this string seems
+        # ignored)
+        return "Hello from Python (cmd=%d)!!" % (cmd,)
+
 def DllRegisterServer():
     import winreg
     key = winreg.CreateKey(winreg.HKEY_CLASSES_ROOT,
@@ -128,19 +185,30 @@ def DllRegisterServer():
     winreg.SetValueEx(subkey2, None, 0, winreg.REG_SZ, ShellExtension._reg_clsid_)
     print(ShellExtension._reg_desc_, "registration complete.")
 
+    
+    key = winreg.CreateKey(winreg.HKEY_CLASSES_ROOT,
+                            "Directory\\Background\\shellex")
+    subkey = winreg.CreateKey(key, "ContextMenuHandlers")
+    subkey2 = winreg.CreateKey(subkey, "PythonSample")
+    winreg.SetValueEx(subkey2, None, 0, winreg.REG_SZ, ShellExtensionFolder._reg_clsid_)
+    print(ShellExtensionFolder._reg_desc_, "registration complete.")
+
 def DllUnregisterServer():
     import winreg
     try:
         key = winreg.DeleteKey(winreg.HKEY_CLASSES_ROOT,
                                 "*\\shellex\\ContextMenuHandlers\\PythonSample")
+        key = winreg.DeleteKey(winreg.HKEY_CLASSES_ROOT,
+                                "Directory\\Background\\shellex\\ContextMenuHandlers\\PythonSample")
     except WindowsError as details:
         import errno
         if details.errno != errno.ENOENT:
             raise
     print(ShellExtension._reg_desc_, "unregistration complete.")
+    print(ShellExtensionFolder._reg_desc_, "unregistration complete.")
 
 if __name__=='__main__':
     from win32com.server import register
-    register.UseCommandLine(ShellExtension,
+    register.UseCommandLine(ShellExtension, ShellExtensionFolder,
                    finalize_register = DllRegisterServer,
                    finalize_unregister = DllUnregisterServer)
