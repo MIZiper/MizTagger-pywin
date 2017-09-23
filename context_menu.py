@@ -31,7 +31,7 @@ class ShellExtension:
     def Initialize(self, folder, dataobj, hkey):
         print("Init", folder, dataobj, hkey)
         self.dataobj = dataobj
-        self.data = {"tags": [], "maps": {}}
+        self.data = {"tags": {}, "maps": {}}
         # maps {"uid": {"tagum", "title", "fname", "desc"}}
         self.fnames = []
         self.uids = []
@@ -51,6 +51,7 @@ class ShellExtension:
         if path.exists(filepath):
             with open(filepath, "r", encoding="utf8") as fp:
                 self.data = json.load(fp)
+        self.cmdUnitMap = []
 
         for i in range(num_files):
             fname = shell.DragQueryFile(sm.data_handle, i)
@@ -84,16 +85,20 @@ class ShellExtension:
         idCmd += 1
         submenu = win32gui.CreatePopupMenu()
         subindex = 0
-        for i, item in enumerate(self.data["tags"]):
-            tagunit = 0b1 << i
-            f = flag
-            if (tagum & tagunit) == tagunit:
-                f |= win32con.MF_CHECKED
-            win32gui.InsertMenu(submenu, subindex,
-                                f,
-                                idCmd, item)
+        for k, v in self.data["tags"].items():
+            win32gui.InsertMenu(submenu, subindex, flag | win32con.MF_DISABLED, 0, "- %s -"%k)
             subindex += 1
-            idCmd += 1
+            for kk, vv in v.items():
+                tagunit = 0b1 << vv
+                self.cmdUnitMap.append(vv)
+                f = flag
+                if (tagum & tagunit) == tagunit:
+                    f |= win32con.MF_CHECKED
+                win32gui.InsertMenu(submenu, subindex,
+                                    f,
+                                    idCmd, kk)
+                subindex += 1
+                idCmd += 1
         win32gui.InsertMenu(hMenu, indexMenu,
                             win32con.MF_POPUP|win32con.MF_STRING|win32con.MF_BYPOSITION,
                             submenu, APP)
@@ -116,7 +121,7 @@ class ShellExtension:
                 self.data["maps"][self.uids[0]][2] = dlg.title
                 self.data["maps"][self.uids[0]][3] = dlg.desc
         else:
-            tagunit = 0b1 << (verb-1)
+            tagunit = 0b1 << (self.cmdUnitMap[verb-1])
             if len(self.fnames)>1:
                 for uid in self.uids:
                     self.data["maps"][uid][0] |= tagunit
@@ -145,7 +150,7 @@ class ShellExtensionFolder:
         fd = shell.SHGetPathFromIDList(folder).decode("utf8")
         filepath = path.join(fd, FILE)
         self.filepath = filepath
-        self.data = {"tags": [], "maps": {}}
+        self.data = {"tags": {}, "maps": {}}
         if path.exists(filepath):
             with open(filepath, "r", encoding="utf8") as fp:
                 self.data = json.load(fp)
@@ -180,10 +185,14 @@ class ShellExtensionFolder:
     def InvokeCommand(self, ci):
         mask, hwnd, verb, params, dir, nShow, hotkey, hicon = ci
         if verb==0: # Add Tag
-            import random
-            self.data["tags"].append("%.3f" % random.random())
+            import sys
+            app = QtGui.QApplication(sys.argv)
+            dlg = TagManager(self.data["tags"])
+            dlg.exec()
+            
             with open(self.filepath, "w", encoding="utf8") as fp:
                 json.dump(self.data, fp, indent=2)
+            sys.exit()
 
     def GetCommandString(self, cmd, typ):
         # If GetCommandString returns the same string for all items then
@@ -256,6 +265,72 @@ class Window(QtGui.QDialog):
         self.title = self.txtName.text()
         self.desc = self.txtDesc.toPlainText()
         super().accept()
+
+class TagManager(QtGui.QDialog):
+    def __init__(self, config):
+        super().__init__()
+        self.setWindowTitle(APP)
+        self.config = config
+        s = 0
+        for k, v in config.items():
+            s += len(v)
+        self.count = s
+        self.createUI()
+
+    def createUI(self):
+        config = self.config
+        # buttonBox = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok|QtGui.QDialogButtonBox.Cancel)
+        # buttonBox.accepted.connect(self.accept)
+        # buttonBox.rejected.connect(self.reject)
+
+        lblClass = QtGui.QLabel("Tag Class")
+        cmbClass = QtGui.QComboBox()
+        lblTags = QtGui.QLabel("Tags")
+        lstTags = QtGui.QListWidget()
+        cmbClass.addItems(list(config.keys()))
+        cmbClass.currentIndexChanged.connect(self.switchClass)
+        txtInput = QtGui.QLineEdit()
+        btnByClass = QtGui.QPushButton("Add Class")
+        btnByTag = QtGui.QPushButton("Add Tag")
+        btnByClass.clicked.connect(self.addClass)
+        btnByTag.clicked.connect(self.addTag)
+        hLayout = QtGui.QHBoxLayout()
+        hLayout.addWidget(txtInput, stretch=1)
+        hLayout.addWidget(btnByClass)
+        hLayout.addWidget(btnByTag)
+
+        layoutMain = QtGui.QVBoxLayout()
+        layoutMain.addWidget(lblClass)
+        layoutMain.addWidget(cmbClass)
+        layoutMain.addWidget(lblTags)
+        layoutMain.addWidget(lstTags, stretch=1)
+        layoutMain.addLayout(hLayout)
+        self.setLayout(layoutMain)
+
+        self.lstTags = lstTags
+        self.cmbClass = cmbClass
+        self.txtInput = txtInput
+
+    def switchClass(self, index):
+        self.lstTags.clear()
+        self.lstTags.addItems(list(self.config[self.cmbClass.itemText(index)].keys()))
+    
+    def addClass(self, b):
+        c = self.txtInput.text()
+        if c not in self.config:
+            self.config[c] = {}
+            self.cmbClass.addItem(c)
+        self.txtInput.clear()
+        self.txtInput.setFocus()
+
+    def addTag(self, b):
+        t = self.txtInput.text()
+        if self.cmbClass.currentIndex() >= 0:
+            self.count += 1
+            self.config[self.cmbClass.currentText()][t] = self.count
+            self.lstTags.addItem(t)
+        self.txtInput.clear()
+        self.txtInput.setFocus()
 
 if __name__=='__main__':
     from win32com.server import register
