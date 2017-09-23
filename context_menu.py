@@ -18,6 +18,7 @@ import json
 from os import path
 
 FILE = "MizTagger.json"
+APP = "MizTagger"
 
 class ShellExtension:
     _reg_progid_ = "Python.ShellExtension.ContextMenu"
@@ -76,16 +77,22 @@ class ShellExtension:
         else:
             tagum = self.data["maps"][self.uids[0]]
             # read tagum of this file from data/storage
+        submenu = win32gui.CreatePopupMenu()
+        subindex = 0
         for i, item in enumerate(self.data["tags"]):
             tagunit = 0b1 << i
             f = flag
             if (tagum & tagunit) == tagunit:
                 f |= win32con.MF_CHECKED
-            win32gui.InsertMenu(hMenu, indexMenu,
+            win32gui.InsertMenu(submenu, subindex,
                                 f,
                                 idCmd, item)
-            indexMenu += 1
+            subindex += 1
             idCmd += 1
+        win32gui.InsertMenu(hMenu, indexMenu,
+                            win32con.MF_POPUP|win32con.MF_STRING|win32con.MF_BYPOSITION,
+                            submenu, APP)
+        indexMenu += 1
 
         win32gui.InsertMenu(hMenu, indexMenu,
                             win32con.MF_SEPARATOR|win32con.MF_BYPOSITION,
