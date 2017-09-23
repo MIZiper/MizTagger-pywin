@@ -16,6 +16,7 @@ import win32con
 import win32file
 import json
 from os import path
+from PyQt4 import QtCore, QtGui
 
 FILE = "MizTagger.json"
 APP = "MizTagger"
@@ -31,6 +32,7 @@ class ShellExtension:
         print("Init", folder, dataobj, hkey)
         self.dataobj = dataobj
         self.data = {"tags": [], "maps": {}}
+        # maps {"uid": {"tagum", "title", "fname", "desc"}}
         self.fnames = []
         self.uids = []
 
@@ -59,7 +61,7 @@ class ShellExtension:
                 uid = str((info[8]<<32)+info[9])
                 self.uids.append(uid)
                 if uid not in self.data["maps"]:
-                    self.data["maps"][uid] = 0b0
+                    self.data["maps"][uid] = [0b0, path.basename(fname), "", ""]
 
         win32gui.InsertMenu(hMenu, indexMenu,
                             win32con.MF_SEPARATOR|win32con.MF_BYPOSITION,
@@ -74,8 +76,12 @@ class ShellExtension:
             # if more than one file selected, then add the tag to all of them.
             # what if want to remove the tag from all of them? rare case, right?
         else:
-            tagum = self.data["maps"][self.uids[0]]
+            tagum = self.data["maps"][self.uids[0]][0]
+            title = self.data["maps"][self.uids[0]][2] or "- unspecified title -"
+            win32gui.InsertMenu(hMenu, indexMenu, flag, idCmd, title)
+            indexMenu += 1
             # read tagum of this file from data/storage
+        idCmd += 1
         submenu = win32gui.CreatePopupMenu()
         subindex = 0
         for i, item in enumerate(self.data["tags"]):
@@ -101,14 +107,24 @@ class ShellExtension:
 
     def InvokeCommand(self, ci):
         mask, hwnd, verb, params, dir, nShow, hotkey, hicon = ci
-        tagunit = 0b1 << verb
-        if len(self.fnames)>1:
-            for uid in self.uids:
-                self.data["maps"][uid] |= tagunit
+        import sys
+        app = QtGui.QApplication(sys.argv)
+        if verb==0:
+            dlg = Window({"Title": self.data["maps"][self.uids[0]][2], "Description": self.data["maps"][self.uids[0]][3]})
+            dlg.exec()
+            if dlg.result():
+                self.data["maps"][self.uids[0]][2] = dlg.title
+                self.data["maps"][self.uids[0]][3] = dlg.desc
         else:
-            self.data["maps"][self.uids[0]] ^= tagunit
+            tagunit = 0b1 << (verb-1)
+            if len(self.fnames)>1:
+                for uid in self.uids:
+                    self.data["maps"][uid][0] |= tagunit
+            else:
+                self.data["maps"][self.uids[0]][0] ^= tagunit
         with open(self.filepath, "w", encoding="utf8") as fp:
             json.dump(self.data, fp, indent=2)
+        sys.exit()
         # should pay attention to the 'verb', may related to idCmd
 
     def GetCommandString(self, cmd, typ):
@@ -206,6 +222,40 @@ def DllUnregisterServer():
             raise
     print(ShellExtension._reg_desc_, "unregistration complete.")
     print(ShellExtensionFolder._reg_desc_, "unregistration complete.")
+
+class Window(QtGui.QDialog):
+    def __init__(self, config):
+        super().__init__()
+        self.setWindowTitle(APP)
+        self.config = config
+        self.createUI()
+
+    def createUI(self):
+        config = self.config
+        buttonBox = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok|QtGui.QDialogButtonBox.Cancel)
+        buttonBox.accepted.connect(self.accept)
+        buttonBox.rejected.connect(self.reject)
+
+        lblTitle = QtGui.QLabel("Title")
+        txtName = QtGui.QLineEdit(config["Title"])
+        lblDesc = QtGui.QLabel("Description")
+        txtDesc = QtGui.QPlainTextEdit(config["Description"])
+
+        layoutMain = QtGui.QVBoxLayout()
+        layoutMain.addWidget(lblTitle)
+        layoutMain.addWidget(txtName)
+        layoutMain.addWidget(lblDesc)
+        layoutMain.addWidget(txtDesc, stretch=1)
+        layoutMain.addWidget(buttonBox)
+        
+        self.setLayout(layoutMain)
+        self.txtName = txtName
+        self.txtDesc = txtDesc
+
+    def accept(self):
+        self.title = self.txtName.text()
+        self.desc = self.txtDesc.toPlainText()
+        super().accept()
 
 if __name__=='__main__':
     from win32com.server import register
