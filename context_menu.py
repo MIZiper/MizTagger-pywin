@@ -377,8 +377,9 @@ class TagManager(QtGui.QDialog):
         self.txtInput = txtInput
 
     def switchClass(self, index):
-        self.lstTags.clear()
-        self.lstTags.addItems(list(self.config[self.cmbClass.itemText(index)].keys()))
+        if len(self.config) > index:
+            self.lstTags.clear()
+            self.lstTags.addItems(list(self.config[self.cmbClass.itemText(index)].keys()))
     
     def addClass(self, b):
         c = self.txtInput.text()
