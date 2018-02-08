@@ -17,7 +17,7 @@ import win32file
 import json
 from os import path
 import os
-from PyQt4 import QtGui
+from PyQt4 import QtGui, QtCore
 
 FILE = "MizTagger.json"
 RESULT = "MizTagger.rslt"
@@ -178,16 +178,33 @@ class ShellExtensionFolder:
         if self.resultFolder:
             itm = "Clean Result"
             with open(path.join(self.resultFolder, RESULT), "r", encoding="utf8") as fp:
-                lg_all = json.load(fp)["all"]
+                logic = json.load(fp)
         else:
             itm = "Manage Tags"
-            lg_all = 0b0
-        self.lg_all = lg_all
+            logic = {"Contain All": 0b0, "Contain One": 0b0, "Not Any": 0b0, "Not All": 0b0}
+        self.logic = logic
+        lg_all = logic["Contain All"]
         
         win32gui.InsertMenu(hMenu, indexMenu,
                             win32con.MF_STRING|win32con.MF_BYPOSITION,
                             idCmd, itm)
         idCmd += 1
+        indexMenu += 1
+
+        submenu = win32gui.CreatePopupMenu()
+        subindex = 0
+        win32gui.InsertMenu(submenu, subindex, win32con.MF_STRING|win32con.MF_BYPOSITION, idCmd, "Complex Filter")
+        subindex += 1
+        idCmd += 1
+        win32gui.InsertMenu(submenu, subindex, win32con.MF_STRING|win32con.MF_BYPOSITION, idCmd, "Refresh File Name")
+        subindex += 1
+        idCmd += 1
+        win32gui.InsertMenu(submenu, subindex, win32con.MF_STRING|win32con.MF_BYPOSITION, idCmd, "Refresh UID")
+        subindex += 1
+        idCmd += 1
+        win32gui.InsertMenu(hMenu, indexMenu,
+                            win32con.MF_POPUP|win32con.MF_STRING|win32con.MF_BYPOSITION,
+                            submenu, "Util")
         indexMenu += 1
 
         self.cmdUnitMap = []
@@ -237,9 +254,22 @@ class ShellExtensionFolder:
                 with open(self.filepath, "w", encoding="utf8") as fp:
                     json.dump(self.data, fp, indent=2, sort_keys=True)
                 sys.exit()
+        elif verb in (2, 3):
+            pass
         else:
-            tagunit = 0b1 << (self.cmdUnitMap[verb-1])
-            lg_all = self.lg_all ^ tagunit
+            logic = self.logic
+            if verb==1:
+                import sys
+                app = QtGui.QApplication(sys.argv)
+                dlg = Filter(self.data["tags"], logic)
+                dlg.exec()
+                if dlg.result():
+                    logic = dlg.logic
+                else:
+                    return
+            else:
+                tagunit = 0b1 << (self.cmdUnitMap[verb-4])
+                logic["Contain All"] = logic["Contain All"] ^ tagunit
             
             if not self.resultFolder:
                 import tempfile, subprocess
@@ -250,14 +280,20 @@ class ShellExtensionFolder:
                     os.unlink(path.join(self.resultFolder, f))
             rsltpath = path.join(self.resultFolder, RESULT)
             with open(rsltpath, 'w', encoding='utf8') as fp:
-                json.dump({"all": lg_all}, fp, indent=2)
-            if lg_all != 0b0:
+                json.dump(logic, fp, indent=2)
+            if sum(logic.values())!=0b0:
                 for uid, v in self.data['maps'].items():
-                    if (v[0] & lg_all) == lg_all:
+                    if (logic["Contain All"]==0b0 or (v[0]&logic["Contain All"])==logic["Contain All"]) and \
+                       (logic["Contain One"]==0b0 or (v[0]&logic["Contain One"])!=0b0) and \
+                       (logic["Not All"]==0b0 or (v[0]&logic["Not All"])!=logic["Not All"]) and \
+                       (logic["Not Any"]==0b0 or (v[0]&logic["Not Any"])==0b0):
                         os.link(path.join(self.folder, v[1]), path.join(self.resultFolder, v[1]))
                         # there's problem here when the file name was changed
                         # but how to create hard link by index?
 
+    def findFileNameByUid(self, uid, guessFname):
+        pass
+    
     def GetCommandString(self, cmd, typ):
         # If GetCommandString returns the same string for all items then
         # the shell seems to ignore all but one.  This is even true in
@@ -329,6 +365,88 @@ class Window(QtGui.QDialog):
         self.title = self.txtName.text()
         self.desc = self.txtDesc.toPlainText()
         super().accept()
+
+class Filter(QtGui.QDialog):
+    def __init__(self, config, logic):
+        super().__init__()
+        self.setWindowTitle(APP)
+        buttonBox = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok | QtGui.QDialogButtonBox.Cancel)
+        buttonBox.accepted.connect(self.accept)
+        buttonBox.rejected.connect(self.reject)
+
+        lblLogic = QtGui.QLabel("Logic")
+        treeLogic = LogicContainer(config, logic)
+
+        layoutMain = QtGui.QVBoxLayout()
+        layoutMain.addWidget(lblLogic)
+        layoutMain.addWidget(treeLogic, True)
+        layoutMain.addWidget(buttonBox)
+        self.setLayout(layoutMain)
+        self.treeLogic = treeLogic
+        self.logic = logic
+
+    def accept(self):
+        self.logic = self.treeLogic.result()
+        super().accept()
+
+class LogicContainer(QtGui.QTreeWidget):
+    def __init__(self, config, logic, parent=None):
+        super().__init__(parent)
+        self.setHeaderHidden(True)
+        self.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.contextMenu)
+
+        for lg, tagum in logic.items():
+            item = QtGui.QTreeWidgetItem(self)
+            item.setText(0, lg)
+            item.setExpanded(True)
+            for k, v in config.items():
+                for kk, vv in v.items():
+                    if (tagum & (0b1<<vv))==(0b1<<vv):
+                        itm = QtGui.QTreeWidgetItem(item)
+                        itm.setText(0, kk)
+                        itm.setData(0, 33, vv)
+        self.config = config
+
+    def contextMenu(self, position):
+        config = self.config
+        idxes = self.selectedIndexes()
+        if len(idxes)>0:
+            level = 0
+            idx = idxes[0]
+            while idx.parent().isValid():
+                idx = idx.parent()
+                level += 1
+            menu = QtGui.QMenu()
+            if level==0:
+                for k, v in config.items():
+                    classMenu = menu.addMenu(k)
+                    for kk, vv in v.items():
+                        classMenu.addAction(kk).triggered.connect(self.triggerAdd((kk, vv)))
+            elif level==1:
+                menu.addAction("Delete").triggered.connect(self.triggerRemove)
+            menu.exec(self.viewport().mapToGlobal(position))
+    def triggerAdd(self, kv):
+        itm = self.selectedItems()[0]
+        kk, vv = kv
+        def _():
+            item = QtGui.QTreeWidgetItem(itm)
+            item.setText(0, kk)
+            item.setData(0, 33, vv)
+        return _
+    def triggerRemove(self):
+        itm = self.selectedItems()[0]
+        itm.parent().removeChild(itm)
+    def result(self):
+        r = {}
+        for i in range(self.topLevelItemCount()):
+            item = self.topLevelItem(i)
+            t = 0b0
+            for ii in range(item.childCount()):
+                itm = item.child(ii)
+                t |= 0b1<<itm.data(0, 33)
+            r[item.text(0)] = t
+        return r
 
 class TagManager(QtGui.QDialog):
     def __init__(self, config):
