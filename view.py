@@ -1,7 +1,9 @@
 from PyQt4 import QtGui, QtCore
 from os import path
-import os
-from shared import APP
+import os, json, win32file
+
+from shared import APP, FILE, RESULT
+from shared import FileDescription, FilterManager, TagManager
 
 class Window(QtGui.QDialog):
     def __init__(self):

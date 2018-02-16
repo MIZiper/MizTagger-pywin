@@ -17,11 +17,10 @@ import win32file
 import json
 from os import path
 import os
-from PyQt4 import QtGui, QtCore
+from PyQt4 import QtGui
 
-FILE = "MizTagger.json"
-RESULT = "MizTagger.rslt"
-APP = "MizTagger"
+from shared import APP, FILE, RESULT
+from shared import FileDescription, FilterManager, TagManager
 
 class ShellExtension:
     _reg_progid_ = "Python.ShellExtension.ContextMenu"
@@ -121,7 +120,7 @@ class ShellExtension:
         import sys
         app = QtGui.QApplication(sys.argv)
         if verb==0:
-            dlg = Window({"Title": self.data["maps"][self.uids[0]][2], "Description": self.data["maps"][self.uids[0]][3]})
+            dlg = FileDescription({"Title": self.data["maps"][self.uids[0]][2], "Description": self.data["maps"][self.uids[0]][3]})
             dlg.exec()
             if dlg.result():
                 self.data["maps"][self.uids[0]][2] = dlg.title
@@ -261,7 +260,7 @@ class ShellExtensionFolder:
             if verb==1:
                 import sys
                 app = QtGui.QApplication(sys.argv)
-                dlg = Filter(self.data["tags"], logic)
+                dlg = FilterManager(self.data["tags"], logic)
                 dlg.exec()
                 if dlg.result():
                     logic = dlg.logic
@@ -331,190 +330,6 @@ def DllUnregisterServer():
             raise
     print(ShellExtension._reg_desc_, "unregistration complete.")
     print(ShellExtensionFolder._reg_desc_, "unregistration complete.")
-
-class Window(QtGui.QDialog):
-    def __init__(self, config):
-        super().__init__()
-        self.setWindowTitle(APP)
-        self.config = config
-        self.createUI()
-
-    def createUI(self):
-        config = self.config
-        buttonBox = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok|QtGui.QDialogButtonBox.Cancel)
-        buttonBox.accepted.connect(self.accept)
-        buttonBox.rejected.connect(self.reject)
-
-        lblTitle = QtGui.QLabel("Title")
-        txtName = QtGui.QLineEdit(config["Title"])
-        lblDesc = QtGui.QLabel("Description")
-        txtDesc = QtGui.QPlainTextEdit(config["Description"])
-
-        layoutMain = QtGui.QVBoxLayout()
-        layoutMain.addWidget(lblTitle)
-        layoutMain.addWidget(txtName)
-        layoutMain.addWidget(lblDesc)
-        layoutMain.addWidget(txtDesc, stretch=1)
-        layoutMain.addWidget(buttonBox)
-        
-        self.setLayout(layoutMain)
-        self.txtName = txtName
-        self.txtDesc = txtDesc
-
-    def accept(self):
-        self.title = self.txtName.text()
-        self.desc = self.txtDesc.toPlainText()
-        super().accept()
-
-class Filter(QtGui.QDialog):
-    def __init__(self, config, logic):
-        super().__init__()
-        self.setWindowTitle(APP)
-        buttonBox = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok | QtGui.QDialogButtonBox.Cancel)
-        buttonBox.accepted.connect(self.accept)
-        buttonBox.rejected.connect(self.reject)
-
-        lblLogic = QtGui.QLabel("Logic")
-        treeLogic = LogicContainer(config, logic)
-
-        layoutMain = QtGui.QVBoxLayout()
-        layoutMain.addWidget(lblLogic)
-        layoutMain.addWidget(treeLogic, True)
-        layoutMain.addWidget(buttonBox)
-        self.setLayout(layoutMain)
-        self.treeLogic = treeLogic
-        self.logic = logic
-
-    def accept(self):
-        self.logic = self.treeLogic.result()
-        super().accept()
-
-class LogicContainer(QtGui.QTreeWidget):
-    def __init__(self, config, logic, parent=None):
-        super().__init__(parent)
-        self.setHeaderHidden(True)
-        self.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
-        self.customContextMenuRequested.connect(self.contextMenu)
-
-        for lg, tagum in logic.items():
-            item = QtGui.QTreeWidgetItem(self)
-            item.setText(0, lg)
-            item.setExpanded(True)
-            for k, v in config.items():
-                for kk, vv in v.items():
-                    if (tagum & (0b1<<vv))==(0b1<<vv):
-                        itm = QtGui.QTreeWidgetItem(item)
-                        itm.setText(0, kk)
-                        itm.setData(0, 33, vv)
-        self.config = config
-
-    def contextMenu(self, position):
-        config = self.config
-        idxes = self.selectedIndexes()
-        if len(idxes)>0:
-            level = 0
-            idx = idxes[0]
-            while idx.parent().isValid():
-                idx = idx.parent()
-                level += 1
-            menu = QtGui.QMenu()
-            if level==0:
-                for k, v in config.items():
-                    classMenu = menu.addMenu(k)
-                    for kk, vv in v.items():
-                        classMenu.addAction(kk).triggered.connect(self.triggerAdd((kk, vv)))
-            elif level==1:
-                menu.addAction("Delete").triggered.connect(self.triggerRemove)
-            menu.exec(self.viewport().mapToGlobal(position))
-    def triggerAdd(self, kv):
-        itm = self.selectedItems()[0]
-        kk, vv = kv
-        def _():
-            item = QtGui.QTreeWidgetItem(itm)
-            item.setText(0, kk)
-            item.setData(0, 33, vv)
-        return _
-    def triggerRemove(self):
-        itm = self.selectedItems()[0]
-        itm.parent().removeChild(itm)
-    def result(self):
-        r = {}
-        for i in range(self.topLevelItemCount()):
-            item = self.topLevelItem(i)
-            t = 0b0
-            for ii in range(item.childCount()):
-                itm = item.child(ii)
-                t |= 0b1<<itm.data(0, 33)
-            r[item.text(0)] = t
-        return r
-
-class TagManager(QtGui.QDialog):
-    def __init__(self, config):
-        super().__init__()
-        self.setWindowTitle(APP)
-        self.config = config
-        s = 0
-        for k, v in config.items():
-            s += len(v)
-        self.count = s
-        self.createUI()
-        self.switchClass(0)
-
-    def createUI(self):
-        config = self.config
-        # buttonBox = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok|QtGui.QDialogButtonBox.Cancel)
-        # buttonBox.accepted.connect(self.accept)
-        # buttonBox.rejected.connect(self.reject)
-
-        lblClass = QtGui.QLabel("Tag Class")
-        cmbClass = QtGui.QComboBox()
-        lblTags = QtGui.QLabel("Tags")
-        lstTags = QtGui.QListWidget()
-        cmbClass.addItems(list(config.keys()))
-        cmbClass.currentIndexChanged.connect(self.switchClass)
-        txtInput = QtGui.QLineEdit()
-        btnByClass = QtGui.QPushButton("Add Class")
-        btnByTag = QtGui.QPushButton("Add Tag")
-        btnByClass.clicked.connect(self.addClass)
-        btnByTag.clicked.connect(self.addTag)
-        hLayout = QtGui.QHBoxLayout()
-        hLayout.addWidget(txtInput, stretch=1)
-        hLayout.addWidget(btnByClass)
-        hLayout.addWidget(btnByTag)
-
-        layoutMain = QtGui.QVBoxLayout()
-        layoutMain.addWidget(lblClass)
-        layoutMain.addWidget(cmbClass)
-        layoutMain.addWidget(lblTags)
-        layoutMain.addWidget(lstTags, stretch=1)
-        layoutMain.addLayout(hLayout)
-        self.setLayout(layoutMain)
-
-        self.lstTags = lstTags
-        self.cmbClass = cmbClass
-        self.txtInput = txtInput
-
-    def switchClass(self, index):
-        if len(self.config) > index:
-            self.lstTags.clear()
-            self.lstTags.addItems(list(self.config[self.cmbClass.itemText(index)].keys()))
-    
-    def addClass(self, b):
-        c = self.txtInput.text()
-        if c not in self.config:
-            self.config[c] = {}
-            self.cmbClass.addItem(c)
-        self.txtInput.clear()
-        self.txtInput.setFocus()
-
-    def addTag(self, b):
-        t = self.txtInput.text()
-        if self.cmbClass.currentIndex() >= 0:
-            self.count += 1
-            self.config[self.cmbClass.currentText()][t] = self.count
-            self.lstTags.addItem(t)
-        self.txtInput.clear()
-        self.txtInput.setFocus()
 
 if __name__=='__main__':
     from win32com.server import register
