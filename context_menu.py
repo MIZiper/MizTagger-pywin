@@ -13,14 +13,10 @@ from win32com.shell import shell, shellcon
 import win32gui
 import win32con
 
-import win32file
-import json
 from os import path
 import os
-from PyQt4 import QtGui
 
-from shared import APP, FILE, RESULT
-from shared import FileDescription, FilterManager, TagManager
+from shared import APP, TaggerFolder, TaggerFile
 
 class ShellExtension:
     _reg_progid_ = "Python.ShellExtension.ContextMenu"
@@ -32,9 +28,6 @@ class ShellExtension:
     def Initialize(self, folder, dataobj, hkey):
         print("Init", folder, dataobj, hkey)
         self.dataobj = dataobj
-        self.data = {"tags": {}, "maps": {}}
-        # maps {"uid": {"tagum", "title", "fname", "desc"}}
-        self.uids = []
 
     def QueryContextMenu(self, hMenu, indexMenu, idCmdFirst, idCmdLast, uFlags):
         print("QCM", hMenu, indexMenu, idCmdFirst, idCmdLast, uFlags)
@@ -43,31 +36,14 @@ class ShellExtension:
         sm = self.dataobj.GetData(format_etc)
         num_files = shell.DragQueryFile(sm.data_handle, -1)
 
-        folder = path.dirname(shell.DragQueryFile(sm.data_handle, 0))
-        rsltpath = path.join(folder, RESULT)
-        if path.exists(rsltpath):
-            self.folder = path.join(folder, '../')
-            self.resultFolder = folder
-        else:
-            self.folder = folder
-            self.resultFolder = None
-        filepath = path.join(self.folder, FILE)
-        self.filepath = filepath
+        firstFile = shell.DragQueryFile(sm.data_handle, 0)
+        folder = path.dirname(firstFile)
+        self.folderObject = TaggerFolder(folder)
 
-        if path.exists(filepath):
-            with open(filepath, "r", encoding="utf8") as fp:
-                self.data = json.load(fp)
         self.cmdUnitMap = []
-
-        for i in range(num_files):
-            fname = shell.DragQueryFile(sm.data_handle, i)
-            with open(fname, "rb") as fp:
-                handle = win32file._get_osfhandle(fp.fileno())
-                info = win32file.GetFileInformationByHandle(handle)
-                uid = str((info[8]<<32)+info[9])
-                self.uids.append(uid)
-                if uid not in self.data["maps"]:
-                    self.data["maps"][uid] = [0b0, path.basename(fname), "", ""]
+        # fnames = [shell.DragQueryFile(sm.data_handle, i) for i in range(num_files)]
+        # TaggerFile is not for multifiles, so just pause toggleTagunits
+        self.fileObject = TaggerFile(self.folderObject, path.basename(firstFile))
 
         win32gui.InsertMenu(hMenu, indexMenu,
                             win32con.MF_SEPARATOR|win32con.MF_BYPOSITION,
@@ -75,33 +51,30 @@ class ShellExtension:
         indexMenu += 1
 
         flag = win32con.MF_STRING|win32con.MF_BYPOSITION
-        tagum = 0b0
         idCmd = idCmdFirst
         if num_files>1:
             pass
             # if more than one file selected, then add the tag to all of them.
             # what if want to remove the tag from all of them? rare case, right?
         else:
-            tagum = self.data["maps"][self.uids[0]][0]
-            title = self.data["maps"][self.uids[0]][2] or "- unspecified title -"
-            win32gui.InsertMenu(hMenu, indexMenu, flag, idCmd, title)
+            win32gui.InsertMenu(hMenu, indexMenu, flag,
+                                idCmd, self.fileObject.getTitle() or "- unspecified title -")
             indexMenu += 1
-            # read tagum of this file from data/storage
         idCmd += 1
         submenu = win32gui.CreatePopupMenu()
         subindex = 0
-        for k, v in self.data["tags"].items():
-            win32gui.InsertMenu(submenu, subindex, flag | win32con.MF_DISABLED, 0, "- %s -"%k)
+        for tagClass in self.fileObject.getTag():
+            win32gui.InsertMenu(submenu, subindex, flag | win32con.MF_DISABLED,
+                                0, "- %s -" % tagClass["name"])
             subindex += 1
-            for kk, vv in v.items():
-                tagunit = 0b1 << vv
-                self.cmdUnitMap.append(vv)
+            for tagItem in tagClass["tags"]:
+                self.cmdUnitMap.append(tagItem["tagunit"])
                 f = flag
-                if (tagum & tagunit) == tagunit:
+                if tagItem["checked"]:
                     f |= win32con.MF_CHECKED
                 win32gui.InsertMenu(submenu, subindex,
                                     f,
-                                    idCmd, kk)
+                                    idCmd, tagItem["name"])
                 subindex += 1
                 idCmd += 1
         win32gui.InsertMenu(hMenu, indexMenu,
@@ -117,24 +90,14 @@ class ShellExtension:
 
     def InvokeCommand(self, ci):
         mask, hwnd, verb, params, dir, nShow, hotkey, hicon = ci
-        import sys
-        app = QtGui.QApplication(sys.argv)
+
+        from PyQt4 import QtGui
+        app = QtGui.QApplication([])
+
         if verb==0:
-            dlg = FileDescription({"Title": self.data["maps"][self.uids[0]][2], "Description": self.data["maps"][self.uids[0]][3]})
-            dlg.exec()
-            if dlg.result():
-                self.data["maps"][self.uids[0]][2] = dlg.title
-                self.data["maps"][self.uids[0]][3] = dlg.desc
+            self.fileObject.displayFileDescription()
         else:
-            tagunit = 0b1 << (self.cmdUnitMap[verb-1])
-            if len(self.uids)>1:
-                for uid in self.uids:
-                    self.data["maps"][uid][0] |= tagunit
-            else:
-                self.data["maps"][self.uids[0]][0] ^= tagunit
-        with open(self.filepath, "w", encoding="utf8") as fp:
-            json.dump(self.data, fp, indent=2, sort_keys=True)
-        sys.exit()
+            self.fileObject.toggleTagunit(self.cmdUnitMap[verb-1])
         # should pay attention to the 'verb', may related to idCmd
 
     def GetCommandString(self, cmd, typ):
@@ -153,19 +116,7 @@ class ShellExtensionFolder:
 
     def Initialize(self, folder, dataobj, hkey):
         fd = shell.SHGetPathFromIDList(folder).decode("utf8")
-        rsltpath = path.join(fd, RESULT)
-        if path.exists(rsltpath):
-            self.folder = path.join(fd, '../')
-            self.resultFolder = fd
-        else:
-            self.folder = fd
-            self.resultFolder = None
-        filepath = path.join(self.folder, FILE)
-        self.filepath = filepath
-        self.data = {"tags": {}, "maps": {}}
-        if path.exists(filepath):
-            with open(filepath, "r", encoding="utf8") as fp:
-                self.data = json.load(fp)
+        self.folderObject = TaggerFolder(fd)
 
     def QueryContextMenu(self, hMenu, indexMenu, idCmdFirst, idCmdLast, uFlags):
         idCmd = idCmdFirst
@@ -174,15 +125,10 @@ class ShellExtensionFolder:
                             0, None)
         indexMenu += 1
 
-        if self.resultFolder:
+        if self.folderObject.isResultFolder:
             itm = "Clean Result"
-            with open(path.join(self.resultFolder, RESULT), "r", encoding="utf8") as fp:
-                logic = json.load(fp)
         else:
             itm = "Manage Tags"
-            logic = {"Contain All": 0b0, "Contain One": 0b0, "Not Any": 0b0, "Not All": 0b0}
-        self.logic = logic
-        lg_all = logic["Contain All"]
         
         win32gui.InsertMenu(hMenu, indexMenu,
                             win32con.MF_STRING|win32con.MF_BYPOSITION,
@@ -210,18 +156,18 @@ class ShellExtensionFolder:
         flag = win32con.MF_STRING|win32con.MF_BYPOSITION
         submenu = win32gui.CreatePopupMenu()
         subindex = 0
-        for k, v in self.data['tags'].items():
-            win32gui.InsertMenu(submenu, subindex, flag | win32con.MF_DISABLED, 0, "- %s -"%k)
+        for tagClass in self.folderObject.getTag():
+            win32gui.InsertMenu(submenu, subindex, flag | win32con.MF_DISABLED,
+                                0, "- %s -" % tagClass["name"])
             subindex += 1
-            for kk, vv in v.items():
-                tagunit = 0b1 << vv
-                self.cmdUnitMap.append(vv)
+            for tagItem in tagClass["tags"]:
+                self.cmdUnitMap.append(tagItem["tagunit"])
                 f = flag
-                if (lg_all & tagunit) == tagunit:
+                if tagItem["checked"]:
                     f |= win32con.MF_CHECKED
                 win32gui.InsertMenu(submenu, subindex,
                                     f,
-                                    idCmd, kk)
+                                    idCmd, tagItem["name"])
                 subindex += 1
                 idCmd += 1
 
@@ -238,60 +184,42 @@ class ShellExtensionFolder:
 
     def InvokeCommand(self, ci):
         mask, hwnd, verb, params, dir, nShow, hotkey, hicon = ci
+
+        from PyQt4 import QtGui
+        app = QtGui.QApplication([])
+
         if verb==0: # Manage Tags || Clean Result
-            if self.resultFolder:
-                for f in os.listdir(self.resultFolder):
-                    os.unlink(path.join(self.resultFolder, f))
-                os.rmdir(self.resultFolder)
+            if self.folderObject.isResultFolder:
+                resultFolder = self.folderObject.resultFolder
+                for f in os.listdir(resultFolder):
+                    os.unlink(path.join(resultFolder, f))
+                os.rmdir(resultFolder)
                 win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
             else:
-                import sys
-                app = QtGui.QApplication(sys.argv)
-                dlg = TagManager(self.data["tags"])
-                dlg.exec()
-                
-                with open(self.filepath, "w", encoding="utf8") as fp:
-                    json.dump(self.data, fp, indent=2, sort_keys=True)
-                sys.exit()
+                self.folderObject.displayTagManager()
         elif verb in (2, 3):
             pass
         else:
-            logic = self.logic
-            if verb==1:
-                import sys
-                app = QtGui.QApplication(sys.argv)
-                dlg = FilterManager(self.data["tags"], logic)
-                dlg.exec()
-                if dlg.result():
-                    logic = dlg.logic
-                else:
+            if verb==1: # Complex Filter
+                if not self.folderObject.displayFilterManager():
                     return
             else:
-                tagunit = 0b1 << (self.cmdUnitMap[verb-4])
-                logic["Contain All"] = logic["Contain All"] ^ tagunit
+                self.folderObject.toggleFilterTagunit(self.cmdUnitMap[verb-4])
             
-            if not self.resultFolder:
+            folder = self.folderObject.folder
+            if not self.folderObject.isResultFolder:
                 import tempfile, subprocess
-                self.resultFolder = tempfile.mkdtemp(prefix="MizResult_", dir=self.folder)
-                subprocess.Popen("explorer %s"%self.resultFolder)
+                resultFolder = tempfile.mkdtemp(prefix="MizResult_", dir=folder)
+                subprocess.Popen("explorer %s" % resultFolder)
             else:
-                for f in os.listdir(self.resultFolder):
-                    os.unlink(path.join(self.resultFolder, f))
-            rsltpath = path.join(self.resultFolder, RESULT)
-            with open(rsltpath, 'w', encoding='utf8') as fp:
-                json.dump(logic, fp, indent=2)
-            if sum(logic.values())!=0b0:
-                for uid, v in self.data['maps'].items():
-                    if (logic["Contain All"]==0b0 or (v[0]&logic["Contain All"])==logic["Contain All"]) and \
-                       (logic["Contain One"]==0b0 or (v[0]&logic["Contain One"])!=0b0) and \
-                       (logic["Not All"]==0b0 or (v[0]&logic["Not All"])!=logic["Not All"]) and \
-                       (logic["Not Any"]==0b0 or (v[0]&logic["Not Any"])==0b0):
-                        os.link(path.join(self.folder, v[1]), path.join(self.resultFolder, v[1]))
-                        # there's problem here when the file name was changed
-                        # but how to create hard link by index?
-
-    def findFileNameByUid(self, uid, guessFname):
-        pass
+                resultFolder = self.folderObject.resultFolder
+                for f in os.listdir(resultFolder):
+                    os.unlink(path.join(resultFolder, f))
+            self.folderObject.saveLogic(resultFolder)
+            for f in self.folderObject.getFilterResult():
+                os.link(path.join(folder, f), path.join(resultFolder, f))
+                # there's problem here when the file name was changed
+                # but how to create hard link by index?
     
     def GetCommandString(self, cmd, typ):
         # If GetCommandString returns the same string for all items then
