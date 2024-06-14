@@ -1,4 +1,4 @@
-from PyQt4 import QtGui, QtCore
+from PyQt5 import QtWidgets as QtGui, QtCore
 import os, win32file, json
 from os import path
 

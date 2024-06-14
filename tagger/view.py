@@ -1,4 +1,4 @@
-from PyQt4 import QtGui, QtCore
+from PyQt5 import QtWidgets as QtGui, QtCore
 from os import path
 import os
 

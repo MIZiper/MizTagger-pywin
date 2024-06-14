@@ -1,2 +1,3 @@
 # MizTagger-pywin
-A files tag system based on pywin32, using WinPython.
+
+A files tag system based on pywin32.
