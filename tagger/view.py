@@ -1,4 +1,4 @@
-from PyQt5 import QtWidgets as QtGui, QtCore
+from PyQt5 import QtWidgets as QtGui, QtCore, QtGui as QtGui5
 from os import path
 import os
 
@@ -62,7 +62,7 @@ class Window(QtGui.QDialog):
     
     def resizeEvent(self, event):
         directory = self.currentPath
-        metrics = QtGui.QFontMetrics(self.linkBrowse.font())
+        metrics = QtGui5.QFontMetrics(self.linkBrowse.font())
         elided = metrics.elidedText(directory, QtCore.Qt.ElideMiddle, self.linkBrowse.width()-64)
         self.linkBrowse.setText(elided)
 

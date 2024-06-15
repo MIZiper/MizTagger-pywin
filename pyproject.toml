@@ -1,0 +1,14 @@
+[project]
+name = "miz-tagger"
+version = "0.0.1"
+dependencies = ["pywin32", "pyqt5"]
+requires-python = ">=3.8"
+authors = [{ name = "MIZiper", email = "miziper@163.com" }]
+description = "A tagger system to manage files"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+keywords = ["tag", "label", "resource", "filter"]
+
+[project.urls]
+Homepage = "http://mizip.net/"
+Repository = "https://github.com/MIZiper/MizTagger-pywin.git"
