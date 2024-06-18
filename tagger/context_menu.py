@@ -12,11 +12,12 @@ import pythoncom
 from win32com.shell import shell, shellcon
 import win32gui
 import win32con
+from win32com.server.register import UseCommandLine
 
 from os import path
-import os
+import os, subprocess, sys
 
-from shared import APP, TaggerFolder, TaggerFile
+from tagger.shared import APP, TaggerFolder, TaggerFile
 
 class ShellExtension:
     _reg_progid_ = "Python.ShellExtension.ContextMenu"
@@ -259,8 +260,18 @@ def DllUnregisterServer():
     print(ShellExtension._reg_desc_, "unregistration complete.")
     print(ShellExtensionFolder._reg_desc_, "unregistration complete.")
 
+def register_cli():
+    params = [sys.executable, __file__]
+    print("Running ...", params)
+    subprocess.run(params)
+
+def unregister_cli():
+    params = [sys.executable, __file__, "--unregister"]
+    print("Running ...", params)
+    subprocess.run(params)
+
 if __name__=='__main__':
-    from win32com.server import register
-    register.UseCommandLine(ShellExtension, ShellExtensionFolder,
-                   finalize_register = DllRegisterServer,
-                   finalize_unregister = DllUnregisterServer)
+    UseCommandLine(ShellExtension, ShellExtensionFolder,
+        finalize_register = DllRegisterServer,
+        finalize_unregister = DllUnregisterServer
+    )

@@ -12,3 +12,10 @@ keywords = ["tag", "label", "resource", "filter"]
 [project.urls]
 Homepage = "http://mizip.net/"
 Repository = "https://github.com/MIZiper/MizTagger-pywin.git"
+
+[project.scripts]
+MizTagger-register = "tagger.context_menu:register_cli"
+MizTagger-unregister = "tagger.context_menu:unregister_cli"
+
+[project.gui-scripts]
+MizTagger-viewer = "tagger.view:main"

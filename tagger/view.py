@@ -2,7 +2,7 @@ from PyQt5 import QtWidgets as QtGui, QtCore, QtGui as QtGui5
 from os import path
 import os
 
-from shared import APP, TaggerFolder, TaggerFile
+from tagger.shared import APP, TaggerFolder, TaggerFile
 
 class Window(QtGui.QDialog):
     def __init__(self):
