@@ -8,6 +8,10 @@ description = "A tagger system to manage files"
 readme = "README.md"
 license = { text = "Apache-2.0" }
 keywords = ["tag", "label", "resource", "filter"]
+classifiers = [
+    "Environment :: Win32 (MS Windows)",
+]
+
 
 [project.urls]
 Homepage = "http://mizip.net/"
