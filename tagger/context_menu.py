@@ -1,12 +1,7 @@
-# A sample context menu handler.
-# Adds a 'Hello from Python' menu entry to .py files.  When clicked, a
-# simple message box is displayed.
-#
-# To demostrate:
-# * Execute this script to register the context menu.
-# * Open Windows Explorer, and browse to a directory with a .py file.
-# * Right-Click on a .py file - locate and click on 'Hello from Python' on
-#   the context menu.
+# A tag system for file management
+# 
+# Adapted from pywin32 example:
+# https://github.com/mhammond/pywin32/blob/main/com/win32comext/shell/demos/servers/context_menu.py
 
 import pythoncom
 from win32com.shell import shell, shellcon
@@ -20,9 +15,9 @@ import os, subprocess, sys
 from tagger.shared import APP, TaggerFolder, TaggerFile
 
 class ShellExtension:
-    _reg_progid_ = "Python.ShellExtension.ContextMenu"
-    _reg_desc_ = "Python Sample Shell Extension (context menu)"
-    _reg_clsid_ = "{CED0336C-C9EE-4a7f-8D7F-C660393C381F}"
+    _reg_progid_ = "MizTagger.ShellExtension.ContextMenu"
+    _reg_desc_ = "MizTagger context menu entries for file"
+    _reg_clsid_ = "{68601254-c064-4ece-ae27-16d037c65721}"
     _com_interfaces_ = [shell.IID_IShellExtInit, shell.IID_IContextMenu]
     _public_methods_ = shellcon.IContextMenu_Methods + shellcon.IShellExtInit_Methods
 
@@ -198,7 +193,7 @@ class ShellExtensionFolder:
                 win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
             else:
                 self.folderObject.displayTagManager()
-        elif verb in (2, 3):
+        elif verb in (2, 3): # not implemented
             pass
         else:
             if verb==1: # Complex Filter
@@ -234,7 +229,7 @@ def DllRegisterServer():
     key = winreg.CreateKey(winreg.HKEY_CLASSES_ROOT,
                             "*\\shellex")
     subkey = winreg.CreateKey(key, "ContextMenuHandlers")
-    subkey2 = winreg.CreateKey(subkey, "PythonSample")
+    subkey2 = winreg.CreateKey(subkey, "MizTagger")
     winreg.SetValueEx(subkey2, None, 0, winreg.REG_SZ, ShellExtension._reg_clsid_)
     print(ShellExtension._reg_desc_, "registration complete.")
 
@@ -242,7 +237,7 @@ def DllRegisterServer():
     key = winreg.CreateKey(winreg.HKEY_CLASSES_ROOT,
                             "Directory\\Background\\shellex")
     subkey = winreg.CreateKey(key, "ContextMenuHandlers")
-    subkey2 = winreg.CreateKey(subkey, "PythonSample")
+    subkey2 = winreg.CreateKey(subkey, "MizTagger")
     winreg.SetValueEx(subkey2, None, 0, winreg.REG_SZ, ShellExtensionFolder._reg_clsid_)
     print(ShellExtensionFolder._reg_desc_, "registration complete.")
 
@@ -250,9 +245,9 @@ def DllUnregisterServer():
     import winreg
     try:
         key = winreg.DeleteKey(winreg.HKEY_CLASSES_ROOT,
-                                "*\\shellex\\ContextMenuHandlers\\PythonSample")
+                                "*\\shellex\\ContextMenuHandlers\\MizTagger")
         key = winreg.DeleteKey(winreg.HKEY_CLASSES_ROOT,
-                                "Directory\\Background\\shellex\\ContextMenuHandlers\\PythonSample")
+                                "Directory\\Background\\shellex\\ContextMenuHandlers\\MizTagger")
     except WindowsError as details:
         import errno
         if details.errno != errno.ENOENT:
